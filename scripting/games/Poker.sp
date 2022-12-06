@@ -172,35 +172,27 @@ public int GamePoker_MenuHandler(Menu menu, MenuAction action, int client1, int 
 		{
 			if (IsValidClient(client2))
 			{
-				if(Time[client1] <= 0 || Time[client2] <= 0)
+				if(PCubes[client2] == 5)
 				{
-					if(PCubes[client2] == 5)
-					{
-						PrintToChat(client1, "%s Вы не успели собрать комбинацию. Вы проиграли.", GPREFIX);
-						PrintToChat(client2, "%s Игрок \x04%N\x01 не успел собрать комбинацию. Вы победили.", GPREFIX, client1);
-						char buffer1[256];
-						char buffer2[256];
-			
-						FormatEx(buffer1, sizeof(buffer1), "[%i] [%i] [%i] [%i] [%i] - (%s) %N", PCubeFix[client1][0], PCubeFix[client1][1], PCubeFix[client1][2], PCubeFix[client1][3], PCubeFix[client1][4], Cmb[GetClientCmb(PCubeFix[client1])], client1);
-						FormatEx(buffer2, sizeof(buffer2), "[%i] [%i] [%i] [%i] [%i] - (%s) %N", PCubeFix[client2][0], PCubeFix[client2][1], PCubeFix[client2][2], PCubeFix[client2][3], PCubeFix[client2][4], Cmb[GetClientCmb(PCubeFix[client2])], client2);
-			
-						ResultGame(client2, GameName[1], buffer2, buffer1, true);
-						ResultGame(client1, GameName[1], buffer2, buffer1);
-					}
-					else
-					{
-						ResetGame(client1, client2, true);
-						if (IsValidClient(client2))
-						{
-							PrintToChat(client1, "%s Вы не успели собрать комбинацию. Игра закончена.", GPREFIX);
-							PrintToChat(client2, "%s Игрок \x04%N\x01 не успел собрать комбинацию. Игра закончена.", GPREFIX, client1);
-						}
-					}
+					PrintToChat(client1, "%s Вы не успели собрать комбинацию. Вы проиграли.", GPREFIX);
+					PrintToChat(client2, "%s Игрок \x04%N\x01 не успел собрать комбинацию. Вы победили.", GPREFIX, client1);
+					char buffer1[256];
+					char buffer2[256];
+		
+					FormatEx(buffer1, sizeof(buffer1), "[%i] [%i] [%i] [%i] [%i] - (%s) %N", PCubeFix[client1][0], PCubeFix[client1][1], PCubeFix[client1][2], PCubeFix[client1][3], PCubeFix[client1][4], Cmb[GetClientCmb(PCubeFix[client1])], client1);
+					FormatEx(buffer2, sizeof(buffer2), "[%i] [%i] [%i] [%i] [%i] - (%s) %N", PCubeFix[client2][0], PCubeFix[client2][1], PCubeFix[client2][2], PCubeFix[client2][3], PCubeFix[client2][4], Cmb[GetClientCmb(PCubeFix[client2])], client2);
+		
+					ResultGame(client2, GameName[1], buffer2, buffer1, true);
+					ResultGame(client1, GameName[1], buffer2, buffer1);
 				}
 				else
 				{
-					if(PCubes[client1] != 5)		ShowMenu_GamePoker(client1, true);
-					else if(PCubes[client2] != 5)	ShowMenu_GamePoker(client2, true);
+					ResetGame(client1, client2, true);
+					if (IsValidClient(client2))
+					{
+						PrintToChat(client1, "%s Вы не успели собрать комбинацию. Игра закончена.", GPREFIX);
+						PrintToChat(client2, "%s Игрок \x04%N\x01 не успел собрать комбинацию. Игра закончена.", GPREFIX, client1);
+					}
 				}
 			}
 		}
