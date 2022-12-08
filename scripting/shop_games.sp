@@ -70,7 +70,7 @@ public void OnPluginStart()
 
 public Action HookPlayerChat(int iClient, char[] command, int args)
 {
-	if (g_bUseChat[iClient])
+	if(iClient > 0 && g_bUseChat[iClient])
 	{
 		char sResult[64];
 		GetCmdArg(1, sResult, sizeof sResult);
@@ -544,7 +544,7 @@ public int OfferToPlay_MenuHandler(Menu menu, MenuAction action, int client, int
 	else if (action == MenuAction_Cancel)
 	{
 		ResetGame(client, caller);
-		if(IsClientInGame(caller))
+		if(caller > 0 && IsClientInGame(caller) && !IsFakeClient(caller))
 		{
 			PrintToChat(caller, "%s Игрок \x04%N\x01 не принял предложение.", GPREFIX, client);
 		}
