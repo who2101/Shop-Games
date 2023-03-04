@@ -692,7 +692,7 @@ public Action StartGame(Handle timer, any client)
 {
 	switch (Options[client][Game])
 	{
-		case 0: StartGame_KNB(client);
+		case 0: if(OnGame[0]) StartGame_KNB(client); else StartGame_Poker(client);
 		case 1: StartGame_Poker(client);
 	}
 	return Plugin_Continue;
