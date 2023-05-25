@@ -3,34 +3,38 @@
 #include <sourcemod>
 #include <clientprefs>
 #include <shop>
+#include <shop_games>
 
-#define GPREFIX	"\x04[Games]\x01"
-#define GTITLE	"Игры на двоих"
-
-char GameName[][] =
-{
-	"Камень-Ножницы-Бумага",
-	"Покер на Костях"
-};
-
-#define GAMES sizeof(GameName)
-
-Menu	Rules[GAMES];
-
-int		OnGame[GAMES];
 int		Commission;
 int		ConfirmTime;
 int		StartTime;
 int		GameTime;
 int		MinCredits;
 int		MaxCredits;
+KeyValues g_hKv;
+Cookie	CookieResultMenu,
+		CookieGames,
+		CookieMinBet,
+		CookieMaxBet;
 
-Handle	CookieResultMenu;
-Handle	CookieGames[GAMES];
-
-bool	ClientCookie[MAXPLAYERS+1][GAMES];
 bool	ClientCookieResult[MAXPLAYERS+1],
-		g_bUseChat[MAXPLAYERS+1];
+		g_bUseChat[MAXPLAYERS+1],
+		g_bSetMinBet[MAXPLAYERS+1],
+		g_bSetMaxBet[MAXPLAYERS+1],
+		ClientCookie[MAXPLAYERS+1];
+
+StringMap hGames = null;
+
+bool g_bActive;
+
+enum struct eGames
+{
+    char sName[64];
+    Handle hPlugin;
+	Function fncCallback;
+}
+eGames g_eGames[64];
+ArrayList g_hGames;
 
 enum GameOptions
 {
@@ -40,21 +44,67 @@ enum GameOptions
 	Started
 }
 
+Handle g_hOnStart;
 int Options[MAXPLAYERS+1][GameOptions];
-int Time[MAXPLAYERS+1];
-
-#include "games/KNB.sp"
-#include "games/Poker.sp"
 
 public Plugin myinfo =
 {
-	name = "[Shop] Games",
+	name = "[Shop Core] Games",
 	author = "Monroe, Pisex",
-	version = "1.3"
+	version = "2.0"
 };
+
+public APLRes AskPluginLoad2(Handle hMySelf, bool bLate, char[] sError, int iErrorMax)
+{
+    CreateNative("SG_RegisterGame", 	Native_RegisterGame);
+    CreateNative("SG_ResetGame", 	    Native_ResetGame);
+    CreateNative("SG_FinalGame", 	    Native_FinalGame);
+	CreateNative("SG_GetEnemy", 		Native_GetEnemy);
+	CreateNative("SG_IsClientPlay", 	Native_IsClientPlay);
+	CreateNative("SG_IsStart", 			Native_IsStart);
+	CreateNative("SG_GetGameTime", 		Native_GetGameTime);
+	g_hOnStart = CreateGlobalForward("SG_OnStarted", ET_Ignore);
+	RegPluginLibrary("shop_games");
+	return APLRes_Success;
+}
+
+public int Native_GetGameTime(Handle hPlugin, int iNumParams)
+{
+	return GameTime;
+}
+
+public int Native_IsStart(Handle hPlugin, int iNumParams)
+{
+	return g_bActive;
+}
+
+public int Native_GetEnemy(Handle hPlugin, int iNumParams)
+{
+	return GetClientEnemy(GetNativeCell(1));
+}
+
+public int Native_IsClientPlay(Handle hPlugin, int iNumParams)
+{
+	return IsClientPlay(GetNativeCell(1));
+}
+
+public int Native_RegisterGame(Handle hPlugin, int iNumParams)
+{
+	char sResult[64];
+	g_eGames[g_hGames.Length].hPlugin = hPlugin;
+	g_eGames[g_hGames.Length].fncCallback = GetNativeFunction(3);
+	GetNativeString(2,sResult,sizeof sResult);
+	g_eGames[g_hGames.Length].sName = sResult;
+	GetNativeString(1,sResult,sizeof sResult);
+	hGames.SetValue(sResult, g_hGames.Length);
+    g_hGames.PushString(sResult);
+	return 0;
+}
 
 public void OnPluginStart()
 {
+    hGames = new StringMap();
+    g_hGames = new ArrayList(ByteCountToCells(128));
 	LoadConfig();
 
 	RegConsoleCmd("sm_games", Command_Games, "Show main menu");
@@ -66,11 +116,14 @@ public void OnPluginStart()
 	{
 		Shop_Started();
 	}
+	Call_StartForward(g_hOnStart);
+	Call_Finish();
 }
 
 public Action HookPlayerChat(int iClient, char[] command, int args)
 {
-	if(iClient > 0 && g_bUseChat[iClient])
+	if(iClient < 1) return Plugin_Continue; 
+	if(g_bUseChat[iClient])
 	{
 		char sResult[64];
 		GetCmdArg(1, sResult, sizeof sResult);
@@ -101,20 +154,60 @@ public Action HookPlayerChat(int iClient, char[] command, int args)
 		}
 		return Plugin_Handled;
 	}
+	else if(g_bSetMinBet[iClient])
+	{
+		g_bSetMinBet[iClient] = false;
+		char sResult[64];
+		GetCmdArg(1, sResult, sizeof sResult);
+		int iValue = StringToInt(sResult);
+
+		if(iValue != 0 && iValue < MinCredits)
+		{
+			PrintToChat(iClient, "%s Вы ввели меньше минимального порога.", GPREFIX);
+			return Plugin_Handled;
+		}
+		if(iValue != 0 && MaxCredits != 0 && iValue > MaxCredits)
+		{
+			PrintToChat(iClient, "%s Вы превысили максимальный порог.", GPREFIX);
+			return Plugin_Handled;
+		}
+		SetCookieInt(iClient, CookieMinBet, iValue);
+
+		ShowMenu_Settings(iClient);
+		return Plugin_Handled;
+	}
+	else if(g_bSetMaxBet[iClient])
+	{
+		g_bSetMaxBet[iClient] = false;
+		char sResult[64];
+		GetCmdArg(1, sResult, sizeof sResult);
+		int iValue = StringToInt(sResult);
+
+		if(iValue != 0 && iValue < MinCredits)
+		{
+			PrintToChat(iClient, "%s Вы ввели меньше минимального порога.", GPREFIX);
+			return Plugin_Handled;
+		}
+		if(iValue != 0 && MaxCredits != 0 && iValue > MaxCredits)
+		{
+			PrintToChat(iClient, "%s Вы превысили максимальный порог.", GPREFIX);
+			return Plugin_Handled;
+		}
+
+		SetCookieInt(iClient, CookieMaxBet, iValue);
+		
+		ShowMenu_Settings(iClient);
+		return Plugin_Handled;
+	}
 	return Plugin_Continue;
 }
 
 public void OnConfigsExecuted()
 {
-	char buffer[16];
-	for (new i = 0; i < GAMES; i++)
-	{
-		FormatEx(buffer, sizeof(buffer), "shop_game_%i", i);
-		CookieGames[i] = RegClientCookie(buffer, "Ignoring the offer to play", CookieAccess_Private);
-	}
-
+	CookieGames = RegClientCookie("shop_game", "Ignoring the offer to play", CookieAccess_Private);
+	CookieMinBet = RegClientCookie("shop_games_minbet", "Min bet play", CookieAccess_Private);
+	CookieMaxBet = RegClientCookie("shop_games_maxbet", "Max bet play", CookieAccess_Private);
 	CookieResultMenu = RegClientCookie("shop_game_result", "Off result menu", CookieAccess_Private);
-
 	CheckAllClientsCookie();
 }
 
@@ -133,54 +226,30 @@ public void OnPluginEnd()
 	Shop_UnregisterMe();
 }
 
+stock void SetCookieInt(int client, Handle cookie, int value) {
+    char buffer[20];
+    IntToString(value, buffer, sizeof(buffer));
+    SetClientCookie(client, cookie, buffer);
+}
+
 void LoadConfig()
 {
 	char path[PLATFORM_MAX_PATH];
 	Shop_GetCfgFile(path, sizeof(path), "games.cfg");
 
-	KeyValues kv = new KeyValues("Games");
+	g_hKv = new KeyValues("Games");
 
-	kv.ImportFromFile(path);
-	kv.Rewind();
-	if(kv.JumpToKey("Settings"))
+	g_hKv.ImportFromFile(path);
+	g_hKv.Rewind();
+	if(g_hKv.JumpToKey("Settings"))
 	{
-		OnGame[0] =		kv.GetNum("knb",1);
-		OnGame[1] =		kv.GetNum("poker",1);
-		Commission =	kv.GetNum("commission",10);
-		ConfirmTime =	kv.GetNum("confirm_time",20);
-		StartTime =		kv.GetNum("start_time",3);
-		GameTime =		kv.GetNum("game_time",20);
-		MinCredits =	kv.GetNum("min_credits",100);
-		MaxCredits =	kv.GetNum("max_credits",50000);
+		Commission =	g_hKv.GetNum("commission",10);
+		ConfirmTime =	g_hKv.GetNum("confirm_time",20);
+		StartTime =		g_hKv.GetNum("start_time",3);
+		GameTime =		g_hKv.GetNum("game_time",20);
+		MinCredits =	g_hKv.GetNum("min_credits",100);
+		MaxCredits =	g_hKv.GetNum("max_credits",50000);
 	}
-
-	kv.Rewind();
-	char buffer[256];
-	if(kv.JumpToKey("Rules"))
-	{
-		for (int i = 0; i < GAMES; i++)
-		{
-			Rules[i] = new Menu(Rules_Handler);
-			Rules[i].SetTitle("%s \nПравила: %s\n \n", GTITLE, GameName[i]);
-			IntToString(i, buffer, sizeof(buffer));
-			if (kv.JumpToKey(buffer) && kv.GotoFirstSubKey(false))
-			{
-				do
-				{
-					if (kv.GetString(NULL_STRING, buffer, sizeof(buffer)))
-					{
-						Rules[i].AddItem("", buffer, ITEMDRAW_DISABLED);
-					}
-				}
-				while (kv.GotoNextKey(false));
-            	kv.GoBack();
-				kv.GoBack();
-			}
-
-			Rules[i].ExitBackButton = true;
-		}
-	}
-	delete kv;
 }
 
 public int Rules_Handler(Menu menu, MenuAction action, int client, int param)
@@ -206,15 +275,13 @@ void CheckClientCookie(int client)
 	{
 		char buffer[10];
 
-		for (int i = 0; i < GAMES; i++)
-		{
-			ClientCookie[client][i] = false;
-			GetClientCookie(client, CookieGames[i], buffer, sizeof(buffer));
+		
+		ClientCookie[client] = false;
+		GetClientCookie(client, CookieGames, buffer, sizeof(buffer));
 
-			if(StrEqual(buffer, "1"))
-			{
-				ClientCookie[client][i] = true;
-			}
+		if(StrEqual(buffer, "1"))
+		{
+			ClientCookie[client] = true;
 		}
 
 		GetClientCookie(client, CookieResultMenu, buffer, sizeof(buffer));
@@ -226,9 +293,10 @@ void CheckClientCookie(int client)
 	}
 }
 
-public Shop_Started()
+public void Shop_Started()
 {
 	Shop_AddToFunctionsMenu(FunctionDisplay, FunctionSelect);
+	g_bActive = true;
 }
 
 public FunctionDisplay(client, String:buffer[], maxlength)
@@ -246,11 +314,6 @@ public bool FunctionSelect(client)
 	return true;
 }
 
-bool IsValidClient(int client, int credits = 0)
-{
-	return client > 0 ? IsClientInGame(client) && !IsFakeClient(client) ? Shop_GetClientCredits(client) >= credits ? true : false : false : false;
-}
-
 public Action Command_Games(int client, int args)
 {
 	if (IsValidClient(client))
@@ -263,7 +326,7 @@ public Action Command_Games(int client, int args)
 
 void SetMenuTitleEx(Menu menu, int client)
 {
-	menu.SetTitle("%s \nКредитов: %i \n \n", GTITLE, Shop_GetClientCredits(client));
+	menu.SetTitle("%s\n ∟Кредитов: %i \n \n", GTITLE, Shop_GetClientCredits(client));
 }
 
 void ShowMenu_Main(int client)
@@ -307,13 +370,13 @@ void ShowMenu_Games(int client)
 	Menu menu = new Menu(Games_MenuHandler);
 	SetMenuTitleEx(menu, client);
 
-	for (int i = 0; i < GAMES; i++)
-	{
-		if(OnGame[i])
-		{
-			menu.AddItem("", GameName[i]);
-		}
-	}
+    char sBuffer[64], sBuffer2[12];
+	for(int i = 0; i < g_hGames.Length; i++)
+    {
+        g_hGames.GetString(i,sBuffer,sizeof sBuffer);
+        IntToString(i, sBuffer2, sizeof sBuffer2);
+        menu.AddItem(sBuffer2, g_eGames[i].sName);
+    }
 
 	if (!menu.ItemCount)
 	{
@@ -415,7 +478,9 @@ void ShowMenu_Target(int client)
 	char userid[10], name[64];
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (IsValidClient(i, Options[client][bet]) && client != i && !ClientCookie[i][Options[client][Game]])
+		int iMin = GetCookieInt(i, CookieMinBet);
+		int iMax = GetCookieInt(i, CookieMaxBet);
+		if (IsValidClient(i, Options[client][bet]) && i != client && !ClientCookie[i] && (iMin <= Options[client][bet] <= iMax || iMax == 0))
 		{
 			IntToString(GetClientUserId(i), userid, sizeof(userid));
 			GetClientName(i, name, sizeof(name));
@@ -465,7 +530,7 @@ void ShowMenu_Confirm(int client)
 
 	char buffer[128];
 
-	FormatEx(buffer, sizeof(buffer), "Игра: %s", GameName[Options[client][Game]]); menu.AddItem("", buffer, ITEMDRAW_DISABLED);
+	Format(buffer, sizeof(buffer), "Игра: %s", g_eGames[Options[client][Game]].sName); menu.AddItem("", buffer, ITEMDRAW_DISABLED);
 	FormatEx(buffer, sizeof(buffer), "Игрок: %N", Options[client][Target]); menu.AddItem("", buffer, ITEMDRAW_DISABLED);
 	FormatEx(buffer, sizeof(buffer), "Ставка: %i (Комиссия %i%%)\n \n \n", Options[client][bet], Commission); menu.AddItem("", buffer, ITEMDRAW_DISABLED);
 
@@ -491,7 +556,7 @@ public int Confirm_MenuHandler(Menu menu, MenuAction action, int client, int par
 		{
 			new target = Options[client][Target];
 
-			if (IsValidClient(target, Options[client][bet]) && !Options[target][Started] && !ClientCookie[target][Options[client][Game]])
+			if (IsValidClient(target, Options[client][bet]) && !Options[target][Started] && !ClientCookie[target])
 			{
 				PrintToChat(client, "%s Предложение отправлено.", GPREFIX);
 				ShowMenu_OfferToPlay(target, client);
@@ -519,7 +584,7 @@ void ShowMenu_OfferToPlay(int client, int caller)
 	char buffer[128];
 
 	FormatEx(buffer, sizeof(buffer), "От: %N", caller); menu.AddItem("", buffer, ITEMDRAW_DISABLED);
-	FormatEx(buffer, sizeof(buffer), "Игра: %s", GameName[Options[caller][Game]]); menu.AddItem("", buffer, ITEMDRAW_DISABLED);
+	FormatEx(buffer, sizeof(buffer), "Игра: %s", g_eGames[Options[caller][Game]].sName); menu.AddItem("", buffer, ITEMDRAW_DISABLED);
 	FormatEx(buffer, sizeof(buffer), "Ставка: %i (Комиссия %i%%)\n \n \n", Options[caller][bet], Commission); menu.AddItem("", buffer, ITEMDRAW_DISABLED);
 
 	menu.AddItem("", "Принять");
@@ -583,6 +648,12 @@ void TakeCredits(int client1, int client2)
 	Shop_TakeClientCredits(client2, iBet);
 }
 
+public int Native_ResetGame(Handle hPlugin, int iNumParams)
+{
+	ResetGame(GetNativeCell(1), GetNativeCell(2), GetNativeCell(3));
+	return 0;
+}
+
 void ResetGame(int client1, int client2 = 0, bool return_credits = false)
 {
 	if(return_credits && client2 > 0)
@@ -597,14 +668,21 @@ void ResetGame(int client1, int client2 = 0, bool return_credits = false)
 void ShowMenu_Rules(int client)
 {
 	Menu menu = new Menu(Rules_MenuHandler);
-	menu.SetTitle("%s \nПравила:\n \n", GTITLE);
+	menu.SetTitle("%s \n ∟Правила:\n \n", GTITLE);
 
-	for (int i = 0; i < GAMES; i++)
+	
+	g_hKv.Rewind();
+	char buffer[64];
+	if(g_hKv.JumpToKey("Rules") && g_hKv.GotoFirstSubKey(false))
 	{
-		if(OnGame[i])
+		do
 		{
-			menu.AddItem("", GameName[i]);
+			if(g_hKv.GetSectionName(buffer, sizeof(buffer)))
+			{
+				menu.AddItem(buffer, buffer);
+			}
 		}
+		while(g_hKv.GotoNextKey());
 	}
 
 	if (!menu.ItemCount)
@@ -628,7 +706,23 @@ public int Rules_MenuHandler(Menu menu, MenuAction action, int client, int param
 	}
 	else if (action == MenuAction_Select)
 	{
-		Rules[param].Display(client, MENU_TIME_FOREVER);
+		char info[64], buffer[256];
+		menu.GetItem(param, info, sizeof(info));
+		Menu hMenu = new Menu(Rules_Handler);
+		hMenu.SetTitle("%s \nПравила: %s\n \n", GTITLE, info);
+		g_hKv.Rewind();
+		if(g_hKv.JumpToKey("Rules") && g_hKv.JumpToKey(info) && g_hKv.GotoFirstSubKey(false))
+		{
+			do
+			{
+				g_hKv.GetString(NULL_STRING, buffer, sizeof(buffer));
+				hMenu.AddItem("", buffer, ITEMDRAW_DISABLED);
+			}
+			while (g_hKv.GotoNextKey(false));
+		}
+
+		hMenu.ExitBackButton = true;
+		hMenu.Display(client, 0);
 	}
 	return 0;
 }
@@ -636,23 +730,33 @@ public int Rules_MenuHandler(Menu menu, MenuAction action, int client, int param
 void ShowMenu_Settings(int client)
 {
 	Menu menu = new Menu(Settings_MenuHandler);
-	menu.SetTitle("%s \nНастройки:\n \n", GTITLE);
+	menu.SetTitle("%s \n ∟Настройки:\n \n", GTITLE);
 
-	char buffer[256];
-	FormatEx(buffer, sizeof(buffer), "[%s] Отключить меню результатов в конце игры\n \n", ClientCookieResult[client] ? "✓" : "   ");
+	char buffer[256], sValue[12];
+	FormatEx(buffer, sizeof(buffer), "[%s] Отключить меню результатов в конце игры", ClientCookieResult[client] ? "✓" : "   ");
 	menu.AddItem("", buffer);
 
-	for (int i = 0; i < GAMES; i++)
-	{
-		if(OnGame[i])
-		{
-			FormatEx(buffer, sizeof(buffer), "[%s] Игнорировать предложения %s", ClientCookie[client][i] ? "✓" : "   ", GameName[i]);
-			menu.AddItem("", buffer);
-		}
-	}
+	FormatEx(buffer, sizeof(buffer), "[%s] Игнорировать предложения об играх\n \n", ClientCookie[client] ? "✓" : "   ");
+	menu.AddItem("", buffer);
+
+	int iMin = GetCookieInt(client, CookieMinBet);
+	IntToString(iMin, sValue, sizeof sValue);
+	FormatEx(buffer, sizeof(buffer), "[%s] Минимальная ставка предложений", iMin ? sValue : "Не установлено");
+	menu.AddItem("", buffer);
+	
+	int iMax = GetCookieInt(client, CookieMaxBet);
+	IntToString(iMax, sValue, sizeof sValue);
+	FormatEx(buffer, sizeof(buffer), "[%s] Максимальная ставка предложений", iMax ? sValue : "Не установлено");
+	menu.AddItem("", buffer);
 
 	menu.ExitBackButton = true;
 	menu.Display(client, MENU_TIME_FOREVER);
+}
+
+stock int GetCookieInt(int client, Handle cookie) {
+    char buffer[20];
+    GetClientCookie(client, cookie, buffer, sizeof(buffer));
+    return StringToInt(buffer);
 }
 
 public int Settings_MenuHandler(Menu menu, MenuAction action, int client, int param)
@@ -669,18 +773,30 @@ public int Settings_MenuHandler(Menu menu, MenuAction action, int client, int pa
 	{
 		char charBool[2][2] = {"0", "1"};
 
-		if (!param)
+		switch(param)
 		{
-			ClientCookieResult[client] ^= true;
-
-			SetClientCookie(client, CookieResultMenu, charBool[view_as<int>(ClientCookieResult[client])]);
-		}
-		else
-		{
-			param -= 1;
-			ClientCookie[client][param] ^= true;
-
-			SetClientCookie(client, CookieGames[param], charBool[view_as<int>(ClientCookie[client][param])]);
+			case 0:
+			{
+				ClientCookieResult[client] ^= true;
+				SetClientCookie(client, CookieResultMenu, charBool[view_as<int>(ClientCookieResult[client])]);
+			}
+			case 1:
+			{
+				ClientCookie[client] ^= true;
+				SetClientCookie(client, CookieGames, charBool[view_as<int>(ClientCookie[client])]);
+			}
+			case 2:
+			{
+				PrintToChat(client, "%s Введите желаемый минимальный предел в чат (0 - Отключить)", GPREFIX);
+				g_bSetMinBet[client] = true;
+				ShowMenu_Settings(client);
+			}
+			case 3:
+			{
+				PrintToChat(client, "%s Введите желаемый максимальный предел в чат (0 - Отключить)", GPREFIX);
+				g_bSetMaxBet[client] = true;
+				ShowMenu_Settings(client);
+			}
 		}
 
 		ShowMenu_Settings(client);
@@ -690,17 +806,25 @@ public int Settings_MenuHandler(Menu menu, MenuAction action, int client, int pa
 
 public Action StartGame(Handle timer, any client)
 {
-	switch (Options[client][Game])
-	{
-		case 0: if(OnGame[0]) StartGame_KNB(client); else StartGame_Poker(client);
-		case 1: StartGame_Poker(client);
-	}
+	Call_StartFunction(g_eGames[Options[client][Game]].hPlugin, g_eGames[Options[client][Game]].fncCallback);
+	Call_PushCell(client);
+	Call_Finish();
 	return Plugin_Continue;
 }
 
 int GetWinCredits(int iBet)
 {
 	return RoundToNearest(float(iBet) / 100 * (100 - Commission * 2));
+}
+
+public int Native_FinalGame(Handle hPlugin, int iNumParams)
+{
+	char sBuff1[256], sBuff2[256], sBuff3[64];
+	GetNativeString(4, sBuff1, sizeof sBuff1);
+	GetNativeString(3, sBuff2, sizeof sBuff2);
+	GetNativeString(2, sBuff3, sizeof sBuff3);
+	ResultGame(GetNativeCell(1), sBuff3, sBuff1, sBuff2, GetNativeCell(5));
+	return 0;
 }
 
 void ResultGame(int client, char[] game_name, char[] buffer1, char[] buffer2, bool win = false)
