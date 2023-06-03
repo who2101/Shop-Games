@@ -115,7 +115,12 @@ public void OnPluginStart()
 	if (Shop_IsStarted())
 	{
 		Shop_Started();
+		RequestFrame(CallForward);
 	}
+}
+
+void CallForward()
+{
 	Call_StartForward(g_hOnStart);
 	Call_Finish();
 }
