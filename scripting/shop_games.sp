@@ -97,7 +97,7 @@ public int Native_RegisterGame(Handle hPlugin, int iNumParams)
 	g_eGames[g_hGames.Length].sName = sResult;
 	GetNativeString(1,sResult,sizeof sResult);
 	hGames.SetValue(sResult, g_hGames.Length);
-    g_hGames.PushString(sResult);
+	g_hGames.PushString(sResult);
 	return 0;
 }
 
@@ -108,6 +108,7 @@ public void OnPluginStart()
 	LoadConfig();
 
 	RegConsoleCmd("sm_games", Command_Games, "Show main menu");
+	RegAdminCmd("sm_games_reload", Command_OnGamesReload, ADMFLAG_ROOT);
 
 	AddCommandListener(HookPlayerChat, "say");
 	AddCommandListener(HookPlayerChat, "say_team");
@@ -115,11 +116,19 @@ public void OnPluginStart()
 	if (Shop_IsStarted())
 	{
 		Shop_Started();
-		RequestFrame(CallForward);
 	}
 }
 
-void CallForward()
+Action Command_OnGamesReload(int iClient, int iArgs)
+{
+	hGames.Clear();
+	g_hGames.Clear();
+	Call_StartForward(g_hOnStart);
+	Call_Finish();
+	return Plugin_Handled;
+}
+
+public void OnAllPluginsLoaded()
 {
 	Call_StartForward(g_hOnStart);
 	Call_Finish();
@@ -426,7 +435,7 @@ void ShowMenu_BetMenu(int client,char[] Text, bool status)
 {
 	if(!status) g_bUseChat[client] = true;
 	Menu menu = new Menu(BetMenu_MenuHandler);
-	menu.SetTitle("%s \nПодтверждение ставки:\n \n", GTITLE);
+	menu.SetTitle("%s \n%s\nПодтверждение ставки:\n \n", GTITLE,  g_eGames[Options[client][Game]].sName);
 	menu.AddItem("1", Text, ITEMDRAW_DISABLED);
 	menu.AddItem("2", "Согласен", status?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
 	menu.AddItem("3", "Изменить ставку", status?ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
@@ -440,7 +449,7 @@ public int BetMenu_MenuHandler(Menu menu, MenuAction action, int client, int par
 	if (action == MenuAction_Cancel)
 	{	
 		if(param == MenuCancel_ExitBack)
-			ShowMenu_Main(client);
+			ShowMenu_Games(client);
 		g_bUseChat[client] = false;
 	}
 	else if (action == MenuAction_Select)
