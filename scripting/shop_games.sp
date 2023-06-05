@@ -12,7 +12,7 @@ int		GameTime;
 int		MinCredits;
 int		MaxCredits;
 KeyValues g_hKv;
-Cookie	CookieResultMenu,
+Handle	CookieResultMenu,
 		CookieGames,
 		CookieMinBet,
 		CookieMaxBet;
@@ -31,7 +31,7 @@ enum struct eGames
 {
     char sName[64];
     Handle hPlugin;
-	Function fncCallback;
+    Function fncCallback;
 }
 eGames g_eGames[64];
 ArrayList g_hGames;
